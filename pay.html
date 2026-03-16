@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة مراجعة ليلتي - النسخة الموحدة ✨</title>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+    <style>
+        :root { --pink: #D2617C; --green: #27ae60; --bg: #f0f2f5; --orange: #e67e22; }
+        body { font-family: 'Tajawal', sans-serif; background: var(--bg); margin: 0; padding: 15px; direction: rtl; }
+        .header { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; margin-bottom: 20px; border-bottom: 4px solid var(--pink); }
+        
+        .card { background: white; border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-right: 6px solid var(--orange); position: relative; }
+        .tag { position: absolute; top: 15px; left: 15px; background: #eee; color: #666; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; }
+        
+        .details p { margin: 8px 0; font-size: 14px; color: #444; }
+        .details b { color: var(--pink); }
+
+        .transfer-box { background: #fff9f0; border: 1.5px dashed var(--orange); padding: 12px; border-radius: 10px; margin: 15px 0; text-align: center; }
+        .transfer-label { display: block; font-size: 12px; color: #d35400; margin-bottom: 5px; }
+        .transfer-number { font-size: 20px; font-weight: 900; color: #2c3e50; letter-spacing: 1.5px; }
+        
+        .btns { display: flex; gap: 10px; margin-top: 15px; }
+        .btn { flex: 1; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-family: 'Tajawal'; cursor: pointer; transition: 0.2s; font-size: 14px; }
+        .btn:active { transform: scale(0.98); }
+        .btn-ok { background: var(--green); color: white; }
+        .btn-no { background: #e74c3c; color: white; }
+
+        #empty-msg { text-align: center; color: #999; margin-top: 50px; display: none; }
+        .time { font-size: 11px; color: #aaa; margin-top: 5px; display: block; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1 style="margin:0; font-size:20px;">مراجعة حجوزات ليلتي 📥</h1>
+        <small>تأكد من الحوالة قبل الضغط على "تأكيد"</small>
+    </div>
+
+    <div id="loading" style="text-align:center; padding:20px;">جاري تحميل طلبات الحجز...</div>
+    <div id="empty-msg">
+        <img src="https://cdn-icons-png.flaticon.com/512/7486/7486744.png" width="80" style="opacity: 0.2;">
+        <p>لا توجد طلبات دفع معلقة حالياً</p>
+    </div>
+    <div id="list"></div>
+
+    <script>
+        const firebaseConfig = { projectId: "gggg-4cab7" };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        function listenToRequests() {
+            db.collection("pending_payments")
+            .where("status", "==", "انتظار مراجعة الموظف")
+            .onSnapshot((snapshot) => {
+                const listDiv = document.getElementById('list');
+                const loading = document.getElementById('loading');
+                const emptyMsg = document.getElementById('empty-msg');
+                
+                loading.style.display = 'none';
+                listDiv.innerHTML = '';
+
+                if (snapshot.empty) {
+                    emptyMsg.style.display = 'block';
+                    return;
+                }
+
+                emptyMsg.style.display = 'none';
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    
+                    const time = d.createdAt ? d.createdAt.toDate().toLocaleString('ar-EG') : 'الآن';
+
+                    card.innerHTML = `
+                        <span class="tag">${d.type || 'دفع إلكتروني'}</span>
+                        <div class="details">
+                            <p>📱 موبايل العميل: <b>${d.customerPhone}</b></p>
+                            <p>🏢 الشريك: <b>${d.partnerName || d.hallName}</b></p>
+                            <p>📝 النوع: <b>${d.type || 'غير محدد'}</b></p>
+                        </div>
+
+                        <div class="transfer-box">
+                            <span class="transfer-label">رقم المحفظة المحول منه:</span>
+                            <span class="transfer-number">${d.transferFrom}</span>
+                        </div>
+
+                        <span class="time">📅 ${time}</span>
+
+                        <div class="btns">
+                            <button class="btn btn-ok" onclick="approve('${doc.id}', ${JSON.stringify(d).replace(/"/g, '&quot;')})">تأكيد الحجز ✅</button>
+                            <button class="btn btn-no" onclick="reject('${doc.id}')">رفض الحجز ❌</button>
+                        </div>
+                    `;
+                    listDiv.appendChild(card);
+                });
+            }, (error) => {
+                document.getElementById('loading').innerText = "حدث خطأ: " + error.message;
+            });
+        }
+
+        async function approve(docId, data) {
+            if(!confirm("هل تأكدت من وصول المبلغ من الرقم " + data.transferFrom + "؟")) return;
+            
+            try {
+                // التعديل الجوهري: توحيد المسميات عند النقل لجدول المؤكد
+                const confirmedData = {
+                    ...data,
+                    // نضمن وجود الكود في الحقلين لكي يراه الشريك أياً كانت النسخة التي يستخدمها
+                    partnerId: data.partnerId || data.hallId, 
+                    hallId: data.hallId || data.partnerId,
+                    status: "مؤكد ✅",
+                    verifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+
+                await db.collection("confirmed_bookings").add(confirmedData);
+                await db.collection("pending_payments").doc(docId).delete();
+                
+                alert("تم التأكيد! سيظهر الحجز الآن في لوحة الشريك كود: " + (data.partnerId || data.hallId));
+            } catch (e) { 
+                alert("خطأ: " + e.message); 
+            }
+        }
+
+        async function reject(docId) {
+            if(!confirm("هل تريد حذف هذا الطلب؟")) return;
+            try {
+                await db.collection("pending_payments").doc(docId).delete();
+                alert("تم الحذف.");
+            } catch (e) { alert("خطأ: " + e.message); }
+        }
+
+        listenToRequests();
+    </script>
+</body>
+</html>
